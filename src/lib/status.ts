@@ -1,4 +1,5 @@
 export const STATUS_LABEL: Record<string, string> = {
+  pending_payment: "Venter på betaling",
   placed: "Afventer bekræftelse",
   accepted: "Bekræftet",
   preparing: "Tilberedes",

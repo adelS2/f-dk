@@ -37,6 +37,7 @@ export interface OrderRecord {
   phone: string;
   address: string;
   note: string;
+  payment_status: string;
   created_at: string;
   updated_at: string;
 }
@@ -99,7 +100,7 @@ export function listOrdersForUser(user: CurrentUser): OrderWithItems[] {
     sql = "SELECT o.*, r.name AS restaurant_name FROM orders o JOIN restaurants r ON r.id = o.restaurant_id WHERE o.customer_id = ? ORDER BY o.created_at DESC LIMIT 100";
     params = [user.id];
   } else if (user.role === "restaurant") {
-    sql = "SELECT o.*, r.name AS restaurant_name FROM orders o JOIN restaurants r ON r.id = o.restaurant_id WHERE o.restaurant_id = ? AND o.status NOT IN ('delivered','cancelled') ORDER BY o.created_at ASC LIMIT 100";
+    sql = "SELECT o.*, r.name AS restaurant_name FROM orders o JOIN restaurants r ON r.id = o.restaurant_id WHERE o.restaurant_id = ? AND o.status NOT IN ('delivered','cancelled','pending_payment') ORDER BY o.created_at ASC LIMIT 100";
     params = [user.restaurantId ?? ""];
   } else {
     sql = `SELECT o.*, r.name AS restaurant_name FROM orders o JOIN restaurants r ON r.id = o.restaurant_id

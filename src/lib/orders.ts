@@ -3,6 +3,8 @@ import { getDb } from "./db";
 import type { CurrentUser } from "./auth";
 import { formatDKK } from "./money";
 import { canViewOrder, type OrderRecord } from "./queries";
+import { getStripe } from "./stripe";
+import { refundOrder } from "./payments";
 
 // Danish menu prices include moms (25%), so VAT is extracted from the gross total.
 const VAT_PERCENT = 25;
@@ -37,7 +39,8 @@ interface RestaurantRow {
   min_order_ore: number;
 }
 
-export function createOrder(user: CurrentUser, input: CheckoutInput): string {
+// Returns the new order id and whether it must be paid via Stripe before the restaurant sees it.
+export function createOrder(user: CurrentUser, input: CheckoutInput): { id: string; requiresPayment: boolean } {
   if (user.role !== "customer") throw new OrderError("Kun kunder kan lægge bestillinger.", 403);
 
   const name = input.name?.trim() ?? "";
@@ -83,10 +86,14 @@ export function createOrder(user: CurrentUser, input: CheckoutInput): string {
     const orderId = randomUUID();
     const now = new Date().toISOString();
 
+    const requiresPayment = getStripe() !== null;
+    const status = requiresPayment ? "pending_payment" : "placed";
+    const paymentStatus = requiresPayment ? "unpaid" : "demo";
+
     db.prepare(`INSERT INTO orders (id, customer_id, restaurant_id, courier_id, status, subtotal_ore, delivery_fee_ore,
-                  vat_ore, total_ore, customer_name, phone, address, note, created_at, updated_at)
-                VALUES (?, ?, ?, NULL, 'placed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(orderId, user.id, restaurantId, subtotal, deliveryFee, vat, total, name, phone, address, note, now, now);
+                  vat_ore, total_ore, customer_name, phone, address, note, created_at, updated_at, payment_status)
+                VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(orderId, user.id, restaurantId, status, subtotal, deliveryFee, vat, total, name, phone, address, note, now, now, paymentStatus);
 
     for (const line of lines) {
       db.prepare(`INSERT INTO order_items (id, order_id, menu_item_id, name, unit_price_ore, quantity)
@@ -95,7 +102,7 @@ export function createOrder(user: CurrentUser, input: CheckoutInput): string {
     }
 
     db.exec("COMMIT");
-    return orderId;
+    return { id: orderId, requiresPayment };
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
@@ -105,7 +112,7 @@ export function createOrder(user: CurrentUser, input: CheckoutInput): string {
 export const ORDER_ACTIONS = ["accept", "reject", "prepare", "ready", "claim", "pickup", "deliver", "cancel"] as const;
 export type OrderAction = (typeof ORDER_ACTIONS)[number];
 
-export function transitionOrder(user: CurrentUser, orderId: string, action: string): { status: string } {
+export async function transitionOrder(user: CurrentUser, orderId: string, action: string): Promise<{ status: string; paymentStatus: string }> {
   const db = getDb();
   const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId) as unknown as OrderRecord | undefined;
   if (!order) throw new OrderError("Bestillingen findes ikke.", 404);
@@ -114,6 +121,7 @@ export function transitionOrder(user: CurrentUser, orderId: string, action: stri
   const now = new Date().toISOString();
   const run = (sql: string, ...params: (string | null)[]) => Number(db.prepare(sql).run(...params).changes);
   let changes = 0;
+  let shouldRefund = false;
 
   const requireRestaurant = () => {
     if (user.role !== "restaurant") throw new OrderError("Kun restauranten kan gøre dette.", 403);
@@ -130,6 +138,7 @@ export function transitionOrder(user: CurrentUser, orderId: string, action: stri
     case "reject":
       requireRestaurant();
       changes = run("UPDATE orders SET status='cancelled', updated_at=? WHERE id=? AND status='placed'", now, orderId);
+      shouldRefund = changes > 0;
       break;
     case "prepare":
       requireRestaurant();
@@ -165,12 +174,15 @@ export function transitionOrder(user: CurrentUser, orderId: string, action: stri
         throw new OrderError("Du kan kun annullere dine egne bestillinger.", 403);
       }
       changes = run("UPDATE orders SET status='cancelled', updated_at=? WHERE id=? AND status='placed'", now, orderId);
+      shouldRefund = changes > 0;
       break;
     default:
       throw new OrderError("Ukendt handling.");
   }
 
   if (changes === 0) throw new OrderError("Handlingen er ikke tilladt i den nuværende status.", 409);
-  const updated = db.prepare("SELECT status FROM orders WHERE id = ?").get(orderId) as unknown as { status: string };
-  return { status: updated.status };
+  if (shouldRefund) await refundOrder(orderId);
+  const updated = db.prepare("SELECT status, payment_status FROM orders WHERE id = ?")
+    .get(orderId) as unknown as { status: string; payment_status: string };
+  return { status: updated.status, paymentStatus: updated.payment_status };
 }

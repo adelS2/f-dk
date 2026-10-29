@@ -19,7 +19,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (!user) return jsonError("Ikke logget ind", 401);
     const { id } = await params;
     const body = await req.json().catch(() => ({}));
-    const result = transitionOrder(user, id, String(body.action ?? ""));
+    const result = await transitionOrder(user, id, String(body.action ?? ""));
     return NextResponse.json(result);
   } catch (error) {
     return handleRouteError(error);

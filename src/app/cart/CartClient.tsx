@@ -66,6 +66,10 @@ export default function CartClient() {
       return;
     }
     writeCart(null);
+    if (data.checkoutUrl) {
+      window.location.href = data.checkoutUrl;
+      return;
+    }
     router.push(`/orders/${data.id}`);
   }
 

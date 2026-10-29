@@ -47,6 +47,15 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
         {order.note && <p><strong>Note:</strong> {order.note}</p>}
       </div>
 
+      {order.status === "pending_payment" && (
+        <p className="mb-4 rounded bg-amber-50 p-3 text-sm text-amber-800">
+          Betalingen er ikke gennemført endnu. Hvis du lukkede betalingsvinduet, skal du bestille igen fra kurven.
+        </p>
+      )}
+      {order.payment_status === "demo" && (
+        <p className="mb-4 text-xs text-gray-500">Demo-tilstand: ingen rigtig betaling er gennemført.</p>
+      )}
+
       <OrderActions orderId={order.id} actions={actions} />
     </section>
   );

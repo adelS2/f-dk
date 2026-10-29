@@ -107,8 +107,18 @@ const SEED_USERS = [
   { email: "kurer@fooddk.dk", name: "Demo Kurer", role: "courier", restaurantId: null },
 ] as const;
 
+function addColumnIfMissing(db: DatabaseSync, table: string, column: string, definition: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[];
+  if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
 function migrate(db: DatabaseSync) {
   db.exec(SCHEMA);
+  // Phase 2: payments and Stripe Connect.
+  addColumnIfMissing(db, "orders", "payment_status", "TEXT NOT NULL DEFAULT 'unpaid'");
+  addColumnIfMissing(db, "orders", "stripe_session_id", "TEXT");
+  addColumnIfMissing(db, "orders", "payment_intent_id", "TEXT");
+  addColumnIfMissing(db, "restaurants", "stripe_account_id", "TEXT");
 }
 
 function seedIfEmpty(db: DatabaseSync) {
